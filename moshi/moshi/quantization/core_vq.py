@@ -282,8 +282,10 @@ class EuclideanCodebook(nn.Module):
         self, x: torch.Tensor, initialize: bool = True
     ) -> _CodebookForwardResult:
         shape = x.shape
-        x = self._reshape_input(x)
+        print(f"T shape pre input: {x.shape}")
 
+        x = self._reshape_input(x)
+        
         if self.training and initialize:
             # If initialize is False, we are not allowed to initialize this layer
             # and the rest of the code will operate on a 0 filled codebook.
@@ -292,7 +294,9 @@ class EuclideanCodebook(nn.Module):
             self._init_embedding(x.detach())
 
         flat_codes = self._quantize(x)
+        print(f"T shape pre out: {flat_codes.shape}")
         codes = self._reshape_codes(flat_codes, shape)
+        print(f"T shape post out: {codes.shape}")
         quantized = self.decode(codes)
         metrics: tp.Dict[str, torch.Tensor] = {}
 
@@ -449,6 +453,8 @@ class ResidualVectorQuantization(nn.Module):
         previous_layer_is_initialized = True
 
         for i, layer in enumerate(self.layers[:n_q]):  # type: ignore
+            print(f"T during resquant: {residual.shape}")
+            
             if self.training:
                 this_layer_is_initialized = layer.initialized
             # We only allow the kmeans initialization if the previous layer is already initialized from the previous

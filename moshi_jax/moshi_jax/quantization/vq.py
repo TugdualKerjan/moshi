@@ -8,13 +8,18 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+from http.client import NotConnected
 import math
 import random
+from re import X
 import typing as tp
+import equinox as eqx
+import equinox.nn as nn
 
-import torch
+import jax
+import jax.numpy as jnp
 
-from .base import BaseQuantizer, QuantizedResult
+from .base import BaseQuantizer
 from .core_vq import ResidualVectorQuantization
 
 
@@ -39,9 +44,22 @@ class ResidualVectorQuantizer(BaseQuantizer):
         codebook_offset (int): Offset to use for the codebook indices. This is useful when using multiple quantizers
             such as in SplitResidualVectorQuantizer.
         force_projection (bool): Whether to force input and output projections even when dimension is constant.
-        generator_seed (int or None): seed used to initialize the RNG used for no quantization.
+        rng_dropout (int or None): seed used to initialize the RNG used for no quantization.
     """
 
+    max_n_q: int
+    n_q: int
+    q_dropout: bool
+    dropout: nn.Dropout
+    dimension: int
+    input_dimension: int
+    output_dimension: int
+    bins: int
+    decay: float
+    input_proj: eqx.Module
+    output_proj: eqx.Module
+    vq: ResidualVectorQuantization
+    
     def __init__(
         self,
         dimension: int = 128,
@@ -56,31 +74,32 @@ class ResidualVectorQuantizer(BaseQuantizer):
         replaced_usage_ratio: float = 1.0,
         codebook_offset: int = 0,
         force_projection: bool = False,
+        key: jax.Array = None # type: ignore
     ):
-        super().__init__()
+        key0, key1, key2 = jax.random.split(key, 3)
+
         self.max_n_q = n_q
         self.n_q = n_q
         self.q_dropout = q_dropout
-        self.no_quantization_rate = no_quantization_rate
+        self.dropout = nn.Dropout(no_quantization_rate)
         self.dimension = dimension
         self.input_dimension = input_dimension or dimension
         self.output_dimension = output_dimension or dimension
         self.bins = bins
         self.decay = decay
-        self.rng_dropout = random.Random(1234)
-        self.input_proj: torch.nn.Module
-        self.output_proj: torch.nn.Module
+
+
         if self.input_dimension == self.dimension and not force_projection:
-            self.input_proj = torch.nn.Identity()
+            self.input_proj = nn.Identity()
         else:
-            self.input_proj = torch.nn.Conv1d(
-                self.input_dimension, self.dimension, 1, bias=False
+            self.input_proj = nn.Conv1d(
+                self.input_dimension, self.dimension, 1, use_bias=False, key=key0
             )
         if self.output_dimension == self.dimension and not force_projection:
-            self.output_proj = torch.nn.Identity()
+            self.output_proj = nn.Identity()
         else:
-            self.output_proj = torch.nn.Conv1d(
-                self.dimension, self.output_dimension, 1, bias=False
+            self.output_proj = nn.Conv1d(
+                self.dimension, self.output_dimension, 1, use_bias=False, key= key1
             )
         self.vq = ResidualVectorQuantization(
             dim=self.dimension,
@@ -90,61 +109,65 @@ class ResidualVectorQuantizer(BaseQuantizer):
             threshold_usage_ratio=threshold_usage_ratio,
             replaced_usage_ratio=replaced_usage_ratio,
             codebook_offset=codebook_offset,
+            key=key2
         )
 
-    def forward(self, x: torch.Tensor, frame_rate: int):
+    @eqx.filter_jit
+    def __call__(self, x: jax.Array, frame_rate: int, key:jax.Array=None): # type: ignore
         """
         Args:
-            x (torch.Tensor): Input tensor of shape [B, C, T] with `C` number of channels.
+            x (jax.Array): Input tensor of shape [C, T] with `C` number of channels.
             frame_rate (int): frame rate of the input (e.g `T = frame_rate * duration`), used to compute
                 the bandwidth.
 
         Returns:
             QuantizedResult: Quantized result with the following attributes:
-                - `x` (torch.Tensor): Quantized tensor of shape [B, C, T].
-                - `codes` (torch.Tensor): Quantized codes of shape [B, K, T] with `K` number of codebooks.
-                - `bw` (torch.Tensor): Bandwidth of the quantized tensor in kbits per second.
-                - `penalty` (torch.Tensor): Commitment loss.
+                - `x` (jax.Array): Quantized tensor of shape [C, T].
+                - `codes` (jax.Array): Quantized codes of shape [K, T] with `K` number of codebooks.
+                - `bw` (jax.Array): Bandwidth of the quantized tensor in kbits per second.
+                - `penalty` (jax.Array): Commitment loss.
                 - `metrics` (dict): RVQ metrics, in particular rate of dead code replacement, and entropy.
         """
+        
         n_q = self.n_q
-        x = self.input_proj(x)
-        print(f"T after input_proj: {x.shape}")
-        if self.training and self.q_dropout:
-            n_q = self.rng_dropout.randint(1, self.n_q)
+        x = self.input_proj(x) # type: ignore
+        print(f"O after input_proj: {x.shape}")
+
+        # if self.training and self.q_dropout:
+        #     n_q = self.rng_dropout.randint(1, self.n_q)
         bw_per_q = math.log2(self.bins) * frame_rate / 1000
-        quantized, codes, commit_loss, metrics = self.vq(x, n_q=n_q)
-        B, _, _ = quantized.shape
-        if self.training and self.no_quantization_rate > 0:
-            mask = (torch.rand(B, 1, 1, device=x.device) <= self.no_quantization_rate).float()
-            quantized = x * mask + (1 - mask) * quantized
-        quantized = self.output_proj(quantized)
+        if self.q_dropout:
+            n_q = jax.random.randint(key, shape=(1,), minval=1, maxval=n_q)[0]
+        quantized, codes, metrics = self.vq(x, n_q=n_q)
+        
+        quantized = jnp.where(self.dropout(jnp.array(1), key=key), quantized, x) # type: ignore
+        quantized = self.output_proj(quantized) # type: ignore
         codes = codes.transpose(0, 1)
         # codes is [B, K, T], with T frames, K nb of codebooks.
-        bw = torch.tensor(n_q * bw_per_q).to(x)
-        return QuantizedResult(quantized, codes, bw, penalty=torch.mean(commit_loss), metrics=metrics)
+        bw = jnp.array(n_q * bw_per_q)
+        return (quantized, codes, bw, metrics)
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: jax.Array) -> jax.Array:
         """Encode a given input tensor with the specified frame rate at the given bandwidth.
         The RVQ encode method sets the appropriate number of quantizer to use
         and returns indices for each quantizer.
         """
         n_q = self.n_q
         if x.shape[-1] == 0:
-            return torch.empty((x.shape[0], n_q, 0), device=x.device, dtype=torch.int64)
+            return jnp.zeros((x.shape[0], n_q, 0))
 
-        x = self.input_proj(x)
+        x = jax.vmap(self.input_proj)(x) # type: ignore
         codes = self.vq.encode(x, n_q=n_q)
-        codes = codes.transpose(0, 1)
+        codes = jnp.transpose(codes, (1, 0))
         # codes is [B, K, T], with T frames, K nb of codebooks.
         return codes
 
-    def decode(self, codes: torch.Tensor) -> torch.Tensor:
+    def decode(self, codes: jax.Array) -> jax.Array:
         """Decode the given codes to the quantized representation."""
         # codes is [B, K, T], with T frames, K nb of codebooks, vq.decode expects [K, B, T].
-        codes = codes.transpose(0, 1)
+        codes = jnp.transpose(codes, (1, 0))
         quantized = self.vq.decode(codes)
-        quantized = self.output_proj(quantized)
+        quantized = jax.vmap(self.output_proj)(quantized) # type: ignore
         return quantized
 
     @property
@@ -202,8 +225,8 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
 
     def _renorm_and_add(
         self,
-        first_val: torch.Tensor,
-        rest_val: torch.Tensor,
+        first_val: jax.Array,
+        rest_val: jax.Array,
         n_q_semantic: int,
         n_q_acoustic: int,
     ):
@@ -217,19 +240,18 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         renorm_rest_val = rest_val * n_q_acoustic / n_q
         return renorm_first_val + renorm_rest_val
 
-    def forward(self, x: torch.Tensor, frame_rate: int):
+    def __call__(self, x: jax.Array, frame_rate: int)-> tp.Tuple:
         """
         Args:
-            x (torch.Tensor): Input tensor of shape [B, C, T] with `C` number of channels.
+            x (jax.Array): Input tensor of shape [C, T] with `C` number of channels.
             frame_rate (int): frame rate of the input (e.g `T = frame_rate * duration`), used to compute
                 the bandwidth.
 
         Returns:
-            QuantizedResult: Quantized result with the following attributes:
-                - `x` (torch.Tensor): Quantized tensor of shape [B, C, T].
-                - `codes` (torch.Tensor): Quantized codes of shape [B, K, T] with `K` number of codebooks.
-                - `bw` (torch.Tensor): Bandwidth of the quantized tensor in kbits per second.
-                - `penalty` (torch.Tensor): Commitment loss.
+            Tuple: Quantized result with the following attributes:
+                - `x` (jax.Array): Quantized tensor of shape  [C, T].
+                - `codes` (jax.Array): Quantized codes of shape [K, T] with `K` number of codebooks.
+                - `bw` (jax.Array): Bandwidth of the quantized tensor in kbits per second.
                 - `metrics` (dict): RVQ metrics, in particular rate of dead code replacement, and entropy.
         """
         semantic_result = self.rvq_first(x, frame_rate)
@@ -237,16 +259,13 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
             return semantic_result
         acoustic_result = self.rvq_rest(x, frame_rate)
         full_quantized_emb = semantic_result.x + acoustic_result.x
-        full_quantized_codes = torch.cat(
-            [semantic_result.codes, acoustic_result.codes], dim=1
+        full_quantized_codes = jnp.concat(
+            [semantic_result.codes, acoustic_result.codes], axis=1
         )
         # This is the actual number of quantizers used,  e.g. taking into account quantizer dropout.
         n_q_semantic = semantic_result.codes.shape[1]
         n_q_acoustic = acoustic_result.codes.shape[1]
         full_quantized_bandwidth = semantic_result.bandwidth + acoustic_result.bandwidth
-        full_quantized_penalty = self._renorm_and_add(
-            semantic_result.penalty, acoustic_result.penalty, n_q_semantic, n_q_acoustic
-        )
         full_quantized_metrics = semantic_result.metrics
         for key, value in acoustic_result.metrics.items():
             if key in full_quantized_metrics:
@@ -255,15 +274,14 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
                 )
             else:
                 full_quantized_metrics[key] = value
-        return QuantizedResult(
+        return (
             full_quantized_emb,
             full_quantized_codes,
             full_quantized_bandwidth,
-            penalty=full_quantized_penalty,
-            metrics=full_quantized_metrics,
+            full_quantized_metrics
         )
 
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
+    def encode(self, x: jax.Array) -> jax.Array:
         """Encode a given input tensor with the specified frame rate at the given bandwidth.
         The RVQ encode method sets the appropriate number of quantizer to use
         and returns indices for each quantizer.
@@ -271,11 +289,11 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         codes = self.rvq_first.encode(x)
         if self.n_q > self.n_q_semantic:
             acoustic_codes = self.rvq_rest.encode(x)
-            codes = torch.cat([codes, acoustic_codes], dim=1)
+            codes = jnp.concat([codes, acoustic_codes], axis=1)
         # codes is [B, K, T], with T frames, K nb of codebooks.
         return codes
 
-    def decode(self, codes: torch.Tensor) -> torch.Tensor:
+    def decode(self, codes: jax.Array) -> jax.Array:
         """Decode the given codes to the quantized representation."""
         # codes is [B, K, T], with T frames, K nb of codebooks.
         quantized = self.rvq_first.decode(codes[:, : self.n_q_semantic])

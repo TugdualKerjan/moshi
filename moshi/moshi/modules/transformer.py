@@ -376,7 +376,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
     def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor):
         state = self._streaming_state
         T = query.shape[1]
-
+        print(f"Their shape of query: {query.shape}")
         if state is None:
             offset = torch.zeros(1, device=query.device, dtype=torch.long)
             offset_cpu = 0
@@ -584,6 +584,7 @@ class StreamingTransformerLayer(StreamingModule[_LayerState]):
         with ExitStack() as stack:
             if x.device.type != 'cuda':
                 stack.enter_context(no_compile())
+            print(f"Theirs {x[0, :10]}")
             x = self._sa_block(x)
             x = self._ff_block(x)
             state = self._streaming_state
