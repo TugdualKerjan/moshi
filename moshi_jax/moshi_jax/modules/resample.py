@@ -31,6 +31,7 @@ class ConvDownsample1d(eqx.Module):
         causal: bool = False,
         learnt: bool = False,
         channel_wise: bool = False,
+        key:jax.Array = None,
     ):
         self.learnt = learnt
         self.channel_wise = channel_wise
@@ -54,6 +55,7 @@ class ConvDownsample1d(eqx.Module):
             groups=groups,
             bias=False,
             pad_mode="replicate",
+            key=key
         )
         if not learnt:
             where = lambda c: c.conv.conv.weight
@@ -87,6 +89,7 @@ class ConvTrUpsample1d(eqx.Module):
         causal: bool = False,
         learnt: bool = False,
         channel_wise: bool = False,
+        key:jax.Array=None,
     ):
         self.learnt = learnt
         self.channel_wise = channel_wise
@@ -109,6 +112,7 @@ class ConvTrUpsample1d(eqx.Module):
             causal=causal,
             groups=groups,
             bias=False,
+            key=key
         )
         if not learnt:
             where = lambda c: c.convtr.convtr.weight

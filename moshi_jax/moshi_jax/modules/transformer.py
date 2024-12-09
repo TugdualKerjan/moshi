@@ -375,8 +375,10 @@ class StreamingTransformerLayer(eqx.Module):
 
     # @eqx.filter_jit
     def __call__(self, x: jax.Array):
-        print(f"Ours: {x[0, :10]}")
+        print(f"Ours: {x[0, :3]}")
         x = self._sa_block(x)
+        print(f"Ours 2: {x[0, :3]}")
+
         x = self._ff_block(x)
         return x
 

@@ -1,3 +1,4 @@
+from operator import xor
 import warnings
 import jax 
 import jax.numpy as jnp
@@ -70,8 +71,6 @@ def pad1d(
         end = padded.shape[-1] - extra_pad
         return padded[..., :end]
     else:
-        print(mode)
-        print(f"Thing for padding: {x.shape}")
         return jnp.pad(x,( (0,0), paddings), mode, constant_values=value)
 
 
@@ -106,9 +105,6 @@ class NormConv1d(eqx.Module):
         self.norm_type = norm
 
     def __call__(self, x):
-        print(f"shape at normconv1d: {x.shape}")
-        print(f"shape of normconv1d: {self.conv.weight.shape}")
-
         return self.conv(x)
     
 class NormConvTranspose1d(eqx.Module):
@@ -207,7 +203,7 @@ class StreamingConv1d(eqx.Module):
     #     assert self.causal, "streaming is only supported for causal convs"
     #     return _StreamingConv1dState(self._padding_total, self._padding_total)
 
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def __call__(self, x):
         padding_total = self._padding_total
         extra_padding = get_extra_padding_for_conv1d(
@@ -229,8 +225,9 @@ class StreamingConv1d(eqx.Module):
         #     if state.padding_to_add > 0 and x.shape[-1] > 0:
         #         x = pad1d(x, (state.padding_to_add, 0), mode=self.pad_mode)
         #         state.padding_to_add = 0
-        print(f"shape at streamingconv1d: {x.shape}")
-        return self.conv(x)
+        x= self.conv(x)
+        print(f"Ours 2: {x[0, :10]}")
+        return x
 
 
 class StreamingConvTranspose1d(eqx.Module):
@@ -275,13 +272,14 @@ class StreamingConvTranspose1d(eqx.Module):
         ), "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
         assert self.trim_right_ratio >= 0.0 and self.trim_right_ratio <= 1.0
     
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def __call__(self, x):
         kernel_size = self.convtr.convtr.kernel_size[0]
         stride = self.convtr.convtr.stride[0]
         padding_total = kernel_size - stride
 
         y = self.convtr(x)
+        print(f"Ours : {y[0, :10]}")
 
         # if not self.is_streaming:
             # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be

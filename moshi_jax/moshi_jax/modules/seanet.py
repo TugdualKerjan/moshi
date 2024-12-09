@@ -113,7 +113,7 @@ class SEANetResnetBlock(eqx.Module):
                 key=key,
             )
 
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def __call__(self, x):
         out = x
 
@@ -220,7 +220,7 @@ class SEANetEncoder(eqx.Module):
             norm_kwargs=norm_kwargs,
             causal=causal,
             pad_mode=pad_mode,
-            key=key0,
+            key=key0
         )
         if mask_fn is not None and mask_position == 0:
             self.blocks += [mask_fn]
@@ -243,7 +243,7 @@ class SEANetEncoder(eqx.Module):
                             pad_mode=pad_mode,
                             compress=compress,
                             true_skip=true_skip,
-                            key=k,
+                            key=k
                         )
                         for j, k in enumerate(jax.random.split(k2, n_residual_layers))
                     ],
@@ -256,7 +256,7 @@ class SEANetEncoder(eqx.Module):
                         norm_kwargs=norm_kwargs,
                         causal=causal,
                         pad_mode=pad_mode,
-                        key=k1,
+                        key=k1
                     ),
                 )
             )
@@ -271,7 +271,7 @@ class SEANetEncoder(eqx.Module):
             norm_kwargs=norm_kwargs,
             causal=causal,
             pad_mode=pad_mode,
-            key=key2,
+            key=key2
         )
 
     @eqx.filter_jit
@@ -279,6 +279,8 @@ class SEANetEncoder(eqx.Module):
         y = self.first_layer(x)
 
         for resnetBlocks, down in self.blocks:
+            print(f"Ours : {y[0, :10]}")
+
             for block in resnetBlocks:
                 y = block(y)
 
@@ -286,6 +288,7 @@ class SEANetEncoder(eqx.Module):
             y = down(y)
 
         y = self.act(y)
+        print(f"Ours : {y[0, :10]}")
         return self.last_layer(y)
 
 
@@ -398,6 +401,17 @@ class SEANetDecoder(eqx.Module):
             )
             self.blocks.append(
                 (
+                    StreamingConvTranspose1d(
+                        mult * n_filters,
+                        mult * n_filters // 2,
+                        kernel_size=ratio * 2,
+                        stride=ratio,
+                        norm=block_norm,
+                        norm_kwargs=norm_kwargs,
+                        causal=causal,
+                        trim_right_ratio=trim_right_ratio,
+                        key=k1,
+                    ),
                     [
                         SEANetResnetBlock(
                             mult * n_filters // 2,
@@ -414,18 +428,7 @@ class SEANetDecoder(eqx.Module):
                             key=k,
                         )
                         for j, k in enumerate(jax.random.split(k2, n_residual_layers))
-                    ],
-                    StreamingConvTranspose1d(
-                        mult * n_filters,
-                        mult * n_filters // 2,
-                        kernel_size=ratio * 2,
-                        stride=ratio,
-                        norm=block_norm,
-                        norm_kwargs=norm_kwargs,
-                        causal=causal,
-                        trim_right_ratio=trim_right_ratio,
-                        key=k1,
-                    ),
+                    ]
                 )
             )
             mult //= 2
@@ -449,7 +452,7 @@ class SEANetDecoder(eqx.Module):
     # @eqx.filter_jit
     def __call__(self, x):
         y = self.first_layer(x)
-        for resnetBlocks, down in self.blocks:
+        for down, resnetBlocks in self.blocks:
             y = self.act(y)
             y = down(y)
             for block in resnetBlocks:

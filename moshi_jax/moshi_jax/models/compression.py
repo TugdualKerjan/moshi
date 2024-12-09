@@ -115,13 +115,15 @@ class MimiModel(CompressionModel):
     decoder_transformer: tp.Optional[eqx.Module]
     encoder_transformer: tp.Optional[eqx.Module]
     quantizer: BaseQuantizer
-    _frame_rate: int
+    _frame_rate: float
     _sample_rate: int
     _channels: int
     encoder_frame_rate: float
     downsample: ConvDownsample1d
     upsample: ConvTrUpsample1d
-
+    dimension: int 
+    resample_method: str
+    
     def __init__(
         self,
         encoder: eqx.Module,
@@ -146,7 +148,7 @@ class MimiModel(CompressionModel):
         self.encoder_transformer = encoder_transformer
         self.decoder_transformer = decoder_transformer
         self.quantizer = quantizer
-        self._frame_rate = int(frame_rate)
+        self._frame_rate = frame_rate
         self._sample_rate = sample_rate
         self._channels = channels
         self.encoder_frame_rate = encoder_frame_rate
@@ -189,18 +191,22 @@ class MimiModel(CompressionModel):
             ), "Cannot interpolate with causal model."
             if resample_method in ["conv", "avg_pool"]:
                 assert (
-                    self.encoder_frame_rate > self.frame_rate
+                    self.encoder_frame_rate > self._frame_rate
                 ), "Cannot upsample with conv."
-                downsample_stride = self.encoder_frame_rate / self.frame_rate
+                print(self.encoder_frame_rate)
+                print(self._frame_rate)
+                downsample_stride = self.encoder_frame_rate / self._frame_rate
                 assert downsample_stride == int(
                     downsample_stride
                 ), f"Only integer strides are supported, got {downsample_stride}"
                 learnt = resample_method == "conv"
+                key0, key1 = jax.random.split(key)
                 self.downsample = ConvDownsample1d(
                     int(downsample_stride),
                     dimension=dimension,
                     learnt=learnt,
                     causal=causal,
+                    key=key0
                 )
                 # if freeze_encoder:
                 #     for p in self.downsample.parameters():
@@ -211,6 +217,7 @@ class MimiModel(CompressionModel):
                     learnt=learnt,
                     causal=causal,
                     channel_wise=upsample_channel_wise_bug,
+                    key=key1
                 )
 
     @property
@@ -218,7 +225,7 @@ class MimiModel(CompressionModel):
         return self._channels
 
     @property
-    def frame_rate(self) -> int:
+    def frame_rate(self) -> float:
         return self._frame_rate
 
     @property

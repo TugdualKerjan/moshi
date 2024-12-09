@@ -376,7 +376,7 @@ class ResidualVectorQuantization(eqx.Module):
         n_q = n_q or len(self.layers)
 
         for i, layer in enumerate(self.layers[:n_q]):  # type: ignore
-            print(f"O during resquant: {residual.shape}")
+            jax.debug.print("O aaa {x}", x=residual[:3])
 
             quantized, codes, metrics = layer(residual)
 

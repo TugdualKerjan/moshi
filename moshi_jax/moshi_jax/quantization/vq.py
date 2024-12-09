@@ -130,8 +130,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
 
         n_q = self.n_q
         x = self.input_proj(x)  # type: ignore
-        print(f"O after input_proj: {x.shape}")
-
         # if self.training and self.q_dropout:
         #     n_q = self.rng_dropout.randint(1, self.n_q)
         bw_per_q = math.log2(self.bins) * frame_rate / 1000
@@ -139,6 +137,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
             n_q = jax.random.randint(key, shape=(1,), minval=1, maxval=n_q)[0]
         quantized, codes, metrics = self.vq(x, n_q=n_q)
 
+        jax.debug.print("O after quant: {quantized}", quantized=quantized[10:])
         quantized = jnp.where(self.dropout(jnp.array(1), key=key), quantized, x)  # type: ignore
         quantized = self.output_proj(quantized)  # type: ignore
         codes = codes.transpose(0, 1)
@@ -285,7 +284,7 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
 
         return (
             sem_quantized + ac_quantized,
-            jnp.concat([sem_codes, ac_codes], axis=1),
+            jnp.concat([sem_codes, ac_codes], axis=0),
             sem_bandwidth + ac_bandwidth,
             full_quantized_metrics,
         )
