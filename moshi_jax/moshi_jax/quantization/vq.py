@@ -59,7 +59,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
     input_proj: eqx.Module
     output_proj: eqx.Module
     vq: ResidualVectorQuantization
-    
+
     def __init__(
         self,
         dimension: int = 128,
@@ -74,7 +74,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
         replaced_usage_ratio: float = 1.0,
         codebook_offset: int = 0,
         force_projection: bool = False,
-        key: jax.Array = None # type: ignore
+        key: jax.Array = None,  # type: ignore
     ):
         key0, key1, key2 = jax.random.split(key, 3)
 
@@ -88,7 +88,6 @@ class ResidualVectorQuantizer(BaseQuantizer):
         self.bins = bins
         self.decay = decay
 
-
         if self.input_dimension == self.dimension and not force_projection:
             self.input_proj = nn.Identity()
         else:
@@ -99,7 +98,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
             self.output_proj = nn.Identity()
         else:
             self.output_proj = nn.Conv1d(
-                self.dimension, self.output_dimension, 1, use_bias=False, key= key1
+                self.dimension, self.output_dimension, 1, use_bias=False, key=key1
             )
         self.vq = ResidualVectorQuantization(
             dim=self.dimension,
@@ -109,11 +108,11 @@ class ResidualVectorQuantizer(BaseQuantizer):
             threshold_usage_ratio=threshold_usage_ratio,
             replaced_usage_ratio=replaced_usage_ratio,
             codebook_offset=codebook_offset,
-            key=key2
+            key=key2,
         )
 
-    @eqx.filter_jit
-    def __call__(self, x: jax.Array, frame_rate: int, key:jax.Array=None): # type: ignore
+    # @eqx.filter_jit
+    def __call__(self, x: jax.Array, frame_rate: int, key: jax.Array = None):  # type: ignore
         """
         Args:
             x (jax.Array): Input tensor of shape [C, T] with `C` number of channels.
@@ -128,9 +127,9 @@ class ResidualVectorQuantizer(BaseQuantizer):
                 - `penalty` (jax.Array): Commitment loss.
                 - `metrics` (dict): RVQ metrics, in particular rate of dead code replacement, and entropy.
         """
-        
+
         n_q = self.n_q
-        x = self.input_proj(x) # type: ignore
+        x = self.input_proj(x)  # type: ignore
         print(f"O after input_proj: {x.shape}")
 
         # if self.training and self.q_dropout:
@@ -139,9 +138,9 @@ class ResidualVectorQuantizer(BaseQuantizer):
         if self.q_dropout:
             n_q = jax.random.randint(key, shape=(1,), minval=1, maxval=n_q)[0]
         quantized, codes, metrics = self.vq(x, n_q=n_q)
-        
-        quantized = jnp.where(self.dropout(jnp.array(1), key=key), quantized, x) # type: ignore
-        quantized = self.output_proj(quantized) # type: ignore
+
+        quantized = jnp.where(self.dropout(jnp.array(1), key=key), quantized, x)  # type: ignore
+        quantized = self.output_proj(quantized)  # type: ignore
         codes = codes.transpose(0, 1)
         # codes is [B, K, T], with T frames, K nb of codebooks.
         bw = jnp.array(n_q * bw_per_q)
@@ -156,7 +155,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
         if x.shape[-1] == 0:
             return jnp.zeros((x.shape[0], n_q, 0))
 
-        x = jax.vmap(self.input_proj)(x) # type: ignore
+        x = jax.vmap(self.input_proj)(x)  # type: ignore
         codes = self.vq.encode(x, n_q=n_q)
         codes = jnp.transpose(codes, (1, 0))
         # codes is [B, K, T], with T frames, K nb of codebooks.
@@ -167,7 +166,7 @@ class ResidualVectorQuantizer(BaseQuantizer):
         # codes is [B, K, T], with T frames, K nb of codebooks, vq.decode expects [K, B, T].
         codes = jnp.transpose(codes, (1, 0))
         quantized = self.vq.decode(codes)
-        quantized = jax.vmap(self.output_proj)(quantized) # type: ignore
+        quantized = jax.vmap(self.output_proj)(quantized)  # type: ignore
         return quantized
 
     @property
@@ -196,14 +195,20 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         **kwargs: Arguments to the constructor of `ResidualVectorQuantizer` that are shared between both.
     """
 
+    max_n_q: int
+    n_q_semantic: int
+    n_q_acoustic: int
+    rvq_first: ResidualVectorQuantizer
+    rvq_rest: ResidualVectorQuantizer
+
     def __init__(
         self,
         *,
         n_q: int = 8,
         n_q_semantic: int = 1,
+        key: jax.Array = None,  # type: ignore
         **kwargs,
     ):
-        super().__init__()
         assert n_q > n_q_semantic, (
             f"Number of quantizers {n_q} must be larger "
             f"than the number of semantic quantizers {n_q_semantic}."
@@ -212,14 +217,16 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         self.n_q_semantic = n_q_semantic
         self.n_q_acoustic = n_q - n_q_semantic
         q_dropout = kwargs.pop("q_dropout", False)
+        key0, key1 = jax.random.split(key)
         self.rvq_first = ResidualVectorQuantizer(
-            n_q=n_q_semantic, force_projection=True, q_dropout=False, **kwargs
+            n_q=n_q_semantic, force_projection=True, q_dropout=False, key=key0, **kwargs
         )
         self.rvq_rest = ResidualVectorQuantizer(
             n_q=n_q - n_q_semantic,
             codebook_offset=1,
             force_projection=True,
             q_dropout=q_dropout,
+            key=key1,
             **kwargs,
         )
 
@@ -240,7 +247,7 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         renorm_rest_val = rest_val * n_q_acoustic / n_q
         return renorm_first_val + renorm_rest_val
 
-    def __call__(self, x: jax.Array, frame_rate: int)-> tp.Tuple:
+    def __call__(self, x: jax.Array, frame_rate: int) -> tp.Tuple:
         """
         Args:
             x (jax.Array): Input tensor of shape [C, T] with `C` number of channels.
@@ -254,31 +261,33 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
                 - `bw` (jax.Array): Bandwidth of the quantized tensor in kbits per second.
                 - `metrics` (dict): RVQ metrics, in particular rate of dead code replacement, and entropy.
         """
-        semantic_result = self.rvq_first(x, frame_rate)
+        (sem_quantized, sem_codes, sem_bandwidth, sem_metrics) = self.rvq_first(
+            x, frame_rate
+        )
+        # print(self.n_q)
         if self.n_q == self.n_q_semantic:
-            return semantic_result
-        acoustic_result = self.rvq_rest(x, frame_rate)
-        full_quantized_emb = semantic_result.x + acoustic_result.x
-        full_quantized_codes = jnp.concat(
-            [semantic_result.codes, acoustic_result.codes], axis=1
+            return (sem_quantized, sem_codes, sem_bandwidth, sem_metrics)
+
+        (ac_quantized, ac_codes, ac_bandwidth, ac_metrics) = self.rvq_rest(
+            x, frame_rate
         )
         # This is the actual number of quantizers used,  e.g. taking into account quantizer dropout.
-        n_q_semantic = semantic_result.codes.shape[1]
-        n_q_acoustic = acoustic_result.codes.shape[1]
-        full_quantized_bandwidth = semantic_result.bandwidth + acoustic_result.bandwidth
-        full_quantized_metrics = semantic_result.metrics
-        for key, value in acoustic_result.metrics.items():
+        n_q_semantic = sem_codes.shape[1]
+        n_q_acoustic = ac_codes.shape[1]
+        full_quantized_metrics = sem_metrics
+        for key, value in ac_metrics.items():
             if key in full_quantized_metrics:
                 full_quantized_metrics[key] = self._renorm_and_add(
                     full_quantized_metrics[key], value, n_q_semantic, n_q_acoustic
                 )
             else:
                 full_quantized_metrics[key] = value
+
         return (
-            full_quantized_emb,
-            full_quantized_codes,
-            full_quantized_bandwidth,
-            full_quantized_metrics
+            sem_quantized + ac_quantized,
+            jnp.concat([sem_codes, ac_codes], axis=1),
+            sem_bandwidth + ac_bandwidth,
+            full_quantized_metrics,
         )
 
     def encode(self, x: jax.Array) -> jax.Array:
@@ -290,12 +299,12 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         if self.n_q > self.n_q_semantic:
             acoustic_codes = self.rvq_rest.encode(x)
             codes = jnp.concat([codes, acoustic_codes], axis=1)
-        # codes is [B, K, T], with T frames, K nb of codebooks.
+        # codes is [K, T], with T frames, K nb of codebooks.
         return codes
 
     def decode(self, codes: jax.Array) -> jax.Array:
         """Decode the given codes to the quantized representation."""
-        # codes is [B, K, T], with T frames, K nb of codebooks.
+        # codes is [K, T], with T frames, K nb of codebooks.
         quantized = self.rvq_first.decode(codes[:, : self.n_q_semantic])
         if codes.shape[1] > self.n_q_semantic:
             quantized += self.rvq_rest.decode(codes[:, self.n_q_semantic :])

@@ -4,6 +4,7 @@ import typing as tp
 import equinox as eqx
 import equinox.nn as nn
 
+
 def _ema_inplace(moving_avg: jax.Array, new: jax.Array, decay: float) -> jax.Array:
     return moving_avg * decay + new * (1 - decay)
 
@@ -22,13 +23,11 @@ def _sample_vectors(samples: jax.Array, num: int, key: jax.Array = None) -> jax.
 def _compute_entropy(usage: jax.Array) -> jax.Array:
     # Usage is some unnormalized distribution.
     proba = usage / jnp.sum(usage)
-    p_log_p = jnp.where(
-        proba == 0, 0, proba * jnp.log(proba)
-    )
+    p_log_p = jnp.where(proba == 0, 0, proba * jnp.log(proba))
     return -p_log_p.sum()
 
 
-def _run_kmeans(samples: jax.Array, num_clusters: int, num_iters: int = 50, key: jax.Array = None) -> tp.Tuple[jax.Array, jax.Array]: # type: ignore
+def _run_kmeans(samples: jax.Array, num_clusters: int, num_iters: int = 50, key: jax.Array = None) -> tp.Tuple[jax.Array, jax.Array]:  # type: ignore
 
     k1, key = jax.random.split(key)
     dim = samples.shape[-1]
@@ -38,8 +37,7 @@ def _run_kmeans(samples: jax.Array, num_clusters: int, num_iters: int = 50, key:
     for _ in range(num_iters):
         k1, key = jax.random.split(key)
 
-        dists = jnp.linalg.norm(
-            samples[:, None] - means[None, :], ord=2, axis=-1)
+        dists = jnp.linalg.norm(samples[:, None] - means[None, :], ord=2, axis=-1)
         buckets = jnp.argmin(dists, axis=-1)
         bins = jnp.bincount(buckets, minlength=num_clusters)
         zero_mask = bins == 0
@@ -97,16 +95,18 @@ class EuclideanCodebook(eqx.Module):
     _cached_initialized: bool
     _next_unused_check: int
 
-    def __init__(self,         
-                 dim: int,
-                 codebook_size: int,
-                 decay: float = 0.99,
-                 epsilon: float = 1e-5,
-                 threshold_usage_ratio: float = 0.1,
-                 replaced_usage_ratio: float = 1.0,
-                 check_unused_every: int = 5,
-                 data: jax.Array = None, # type: ignore
-                 key: jax.Array = None): # type: ignore
+    def __init__(
+        self,
+        dim: int,
+        codebook_size: int,
+        decay: float = 0.99,
+        epsilon: float = 1e-5,
+        threshold_usage_ratio: float = 0.1,
+        replaced_usage_ratio: float = 1.0,
+        check_unused_every: int = 5,
+        data: jax.Array = None,  # type: ignore
+        key: jax.Array = None,
+    ):  # type: ignore
 
         self.decay = decay
 
@@ -121,42 +121,51 @@ class EuclideanCodebook(eqx.Module):
         self._cached_initialized = False
 
         self._init_embedding(data, key)
-        
-    def _init_embedding(self, data:jax.Array, key: jax.Array = None) -> None: # type: ignore
+
+    def _init_embedding(self, data: jax.Array, key: jax.Array = None) -> None:  # type: ignore
         embedding, cluster_usage = _run_kmeans(data, self.codebook_size, key=key)
         self.embedding_sum = embedding * cluster_usage[:, None]
         self.cluster_usage = cluster_usage
-        self.embedding= self.embedding_sum / jnp.clip(cluster_usage, min=self.epsilon)[:, None]
-        
-        
+        self.embedding = (
+            self.embedding_sum / jnp.clip(cluster_usage, min=self.epsilon)[:, None]
+        )
+
     @staticmethod
     def _replace_expired_codes(model, samples: jax.Array, mask: jax.Array):
         # Replaces expired centroids, as indicated by `mask` (a true value indicate the code needs to be replaced).
         # The new codes are sampled from the batch `samples`.
         new_vectors = _sample_vectors(samples, model.codebook_size)
         replace_cluster_usage = (
-            model.replaced_usage_ratio * jnp.sum(model.cluster_usage) / model.codebook_size
+            model.replaced_usage_ratio
+            * jnp.sum(model.cluster_usage)
+            / model.codebook_size
         )
-        embedding_sum = jnp.where(mask[:, None], replace_cluster_usage * new_vectors, model.embedding_sum)
-        cluster_usage = jnp.where(mask[:, None], replace_cluster_usage, model.cluster_usage)
-        
-        embedding= embedding_sum / jnp.clip(cluster_usage, min=model.epsilon)[:, None]
-        where = lambda q: (
-            q.embedding_sum,
-            q.cluster_usage,
-            q.embedding
+        embedding_sum = jnp.where(
+            mask[:, None], replace_cluster_usage * new_vectors, model.embedding_sum
         )
-        
+        cluster_usage = jnp.where(
+            mask[:, None], replace_cluster_usage, model.cluster_usage
+        )
+
+        embedding = embedding_sum / jnp.clip(cluster_usage, min=model.epsilon)[:, None]
+        where = lambda q: (q.embedding_sum, q.cluster_usage, q.embedding)
+
         return eqx.tree_at(where, model, (embedding_sum, cluster_usage, embedding))
 
     @staticmethod
     def _check_expired_codes(model, batch_samples: jax.Array):
-        
-        threshold_cluster_usage = model.threshold_usage_ratio * jnp.sum(model.cluster_usage) / model.codebook_size
+
+        threshold_cluster_usage = (
+            model.threshold_usage_ratio
+            * jnp.sum(model.cluster_usage)
+            / model.codebook_size
+        )
         expired_codes = model.cluster_usage < threshold_cluster_usage
-        
-        return EuclideanCodebook._replace_expired_codes(model, batch_samples, expired_codes)
-    
+
+        return EuclideanCodebook._replace_expired_codes(
+            model, batch_samples, expired_codes
+        )
+
     def _reshape_input(self, x: jax.Array) -> jax.Array:
         # Flattens all the dimensions but the last one, e.g. return a vector of shape `[N, D]`.
         return jnp.reshape(x, (-1, x.shape[-1]))
@@ -171,13 +180,11 @@ class EuclideanCodebook(eqx.Module):
         a_squared = jnp.sum(x**2, axis=-1, keepdims=True)
         b_squared = jnp.transpose(jnp.sum(self.embedding**2, axis=-1, keepdims=True))
         distance = (
-            a_squared
-            + b_squared
-            - 2 * jnp.matmul(x, jnp.transpose(self.embedding))
+            a_squared + b_squared - 2 * jnp.matmul(x, jnp.transpose(self.embedding))
         )
 
         return jnp.argmin(distance, axis=-1)
-    
+
     def encode(self, x: jax.Array) -> jax.Array:
         """Given a tensor `x` of shape `[*, D]`, returns a tensor of integer codes of shape `[*]`.
         The codes are defined as the indexes of the centroids nearest to each vector in `x`.
@@ -198,8 +205,8 @@ class EuclideanCodebook(eqx.Module):
         # ), f"Codes should be integers, got {codes.dtype}"
         quantized = self.embedding[codes]
         return quantized
-    
-    @eqx.filter_jit
+
+    # @eqx.filter_jit
     def __call__(self, x):
         shape = x.shape
         print(f"O shape pre input: {x.shape}")
@@ -212,26 +219,26 @@ class EuclideanCodebook(eqx.Module):
         quantized = self.decode(codes)
         return (quantized, codes, {})
 
-            # This whole codebook update should happen after the forward pass
-            #     if self.training:
-            # # We do the expiry of the unused codes at this point as buffers are in sync
-            # # and all the workers will take the same decision.
-            # expired = self._check_expired_codes(x)
-            # metrics['rvq_expired'] = expired
-            # cluster_usage = torch.zeros_like(self.cluster_usage)
-            # cluster_usage.scatter_add_(
-            #     0, flat_codes, torch.ones_like(flat_codes, dtype=cluster_usage.dtype))
-            # _ema_inplace(self.cluster_usage, cluster_usage, self.decay)
+        # This whole codebook update should happen after the forward pass
+        #     if self.training:
+        # # We do the expiry of the unused codes at this point as buffers are in sync
+        # # and all the workers will take the same decision.
+        # expired = self._check_expired_codes(x)
+        # metrics['rvq_expired'] = expired
+        # cluster_usage = torch.zeros_like(self.cluster_usage)
+        # cluster_usage.scatter_add_(
+        #     0, flat_codes, torch.ones_like(flat_codes, dtype=cluster_usage.dtype))
+        # _ema_inplace(self.cluster_usage, cluster_usage, self.decay)
 
-            # if self.initialized:
-            #     # We report the entropy normalized by that of the uniform distribution,
-            #     # This means the codebooks are optimally used when entropy=1.
-            #     metrics['rvq_entropy'] = _compute_entropy(self.cluster_usage) / math.log(self.codebook_size)
+        # if self.initialized:
+        #     # We report the entropy normalized by that of the uniform distribution,
+        #     # This means the codebooks are optimally used when entropy=1.
+        #     metrics['rvq_entropy'] = _compute_entropy(self.cluster_usage) / math.log(self.codebook_size)
 
-            # embedding_sum = torch.zeros_like(self.embedding_sum)
-            # embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
-            # _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
-            # self.register_buffer('_embedding', None)
+        # embedding_sum = torch.zeros_like(self.embedding_sum)
+        # embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
+        # _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
+        # self.register_buffer('_embedding', None)
 
 
 class VectorQuantization(eqx.Module):
@@ -255,10 +262,10 @@ class VectorQuantization(eqx.Module):
 
     project_in: eqx.Module
     project_out: eqx.Module
-    epsilon:float
+    epsilon: float
     _codebook: EuclideanCodebook
     codebook_size: int
-    
+
     def __init__(
         self,
         dim: int,
@@ -267,18 +274,26 @@ class VectorQuantization(eqx.Module):
         decay: float = 0.99,
         epsilon: float = 1e-5,
         threshold_usage_ratio: float = 0.1,
-        key:jax.Array = None, # type: ignore
+        key: jax.Array = None,  # type: ignore
         **kwargs,
     ):
         if codebook_dim is None:
             codebook_dim = dim
 
         requires_projection = codebook_dim != dim
-        key0, key1, key2 = jax.random.split(key ,3)
-        self.project_in =             nn.Linear(dim, codebook_dim, key=key0) if requires_projection else nn.Identity()
-        
-        self.project_out =             nn.Linear(codebook_dim, dim, key=key1) if requires_projection else nn.Identity()
-        
+        key0, key1, key2 = jax.random.split(key, 3)
+        self.project_in = (
+            nn.Linear(dim, codebook_dim, key=key0)
+            if requires_projection
+            else nn.Identity()
+        )
+
+        self.project_out = (
+            nn.Linear(codebook_dim, dim, key=key1)
+            if requires_projection
+            else nn.Identity()
+        )
+
         self.epsilon = epsilon
         self._codebook = EuclideanCodebook(
             dim=codebook_dim,
@@ -301,20 +316,20 @@ class VectorQuantization(eqx.Module):
         return x
 
     def _rearrange_output(self, quantized):
-        quantized = jnp.transpose(quantized,(1, 0))
+        quantized = jnp.transpose(quantized, (1, 0))
         return quantized
 
     def encode(self, x: jax.Array) -> jax.Array:
         """Encodes `x` into discrete integer codes."""
         x = self._rearrange_input(x)
-        x = jax.vmap(self.project_in)(x) # type: ignore
+        x = jax.vmap(self.project_in)(x)  # type: ignore
         codes = self._codebook.encode(x)
         return codes
 
     def decode(self, codes: jax.Array) -> jax.Array:
         """Converts integer codes into quantized vectors."""
         quantized = self._codebook.decode(codes)
-        quantized = jax.vmap(self.project_out)(quantized) # type: ignore
+        quantized = jax.vmap(self.project_out)(quantized)  # type: ignore
         quantized = self._rearrange_output(quantized)
         return quantized
 
@@ -324,7 +339,7 @@ class VectorQuantization(eqx.Module):
 
         quantized = x + jax.lax.stop_gradient(quantized - x)
 
-        quantized = jax.vmap(self.project_out)(quantized) # type: ignore
+        quantized = jax.vmap(self.project_out)(quantized)  # type: ignore
         quantized = self._rearrange_output(quantized)
 
         return (quantized, codes, metrics)
@@ -335,19 +350,17 @@ class ResidualVectorQuantization(eqx.Module):
 
     Follows Algorithm 1. in https://arxiv.org/pdf/2107.03312.pdf
     """
-    
+
     layers: list
     codebook_offset: int
 
-    def __init__(self, *, num_quantizers: int, codebook_offset: int, key:jax.Array=None ,**kwargs): # type: ignore
+    def __init__(self, *, num_quantizers: int, codebook_offset: int, key: jax.Array = None, **kwargs):  # type: ignore
         keys = jax.random.split(key, num_quantizers)
         self.layers = [VectorQuantization(**kwargs, key=k) for k in keys]
         self.codebook_offset = codebook_offset
 
     # @eqx.filter_jit
-    def __call__(
-        self, x: jax.Array, n_q: tp.Optional[int] = None
-    ) :
+    def __call__(self, x: jax.Array, n_q: tp.Optional[int] = None):
         """
         Args:
             x (jax.Array): input tensor to quantize, of shape `[C, T]`.
@@ -365,8 +378,8 @@ class ResidualVectorQuantization(eqx.Module):
         for i, layer in enumerate(self.layers[:n_q]):  # type: ignore
             print(f"O during resquant: {residual.shape}")
 
-            quantized, codes, metrics = layer( residual)
-            
+            quantized, codes, metrics = layer(residual)
+
             residual = residual - quantized
             quantized_out = quantized_out + quantized
 
@@ -384,7 +397,7 @@ class ResidualVectorQuantization(eqx.Module):
         out_codes = jnp.stack(all_codes)
         return (quantized_out, out_codes, all_metrics)
 
-    def encode(self, x: jax.Array, n_q = None) -> jax.Array:
+    def encode(self, x: jax.Array, n_q=None) -> jax.Array:
         """Encodes `x` into discrete integer codes. If `n_q` is provided, only uses the first `n_q` codebook levels."""
         residual = x
         all_indices = []
