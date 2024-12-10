@@ -54,7 +54,7 @@ class ConvDownsample1d(eqx.Module):
             causal=causal,
             groups=groups,
             bias=False,
-            pad_mode="replicate",
+            pad_mode="constant",
             key=key
         )
         if not learnt:

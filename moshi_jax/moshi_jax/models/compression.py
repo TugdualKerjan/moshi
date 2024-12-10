@@ -253,7 +253,7 @@ class MimiModel(CompressionModel):
 
     def _to_framerate(self, x: jax.Array):
         # Convert from the encoder frame rate to the overall framerate.
-        _, _, length = x.shape
+        _, length = x.shape
         frame_rate = self.encoder_frame_rate
         new_frame_rate = self.frame_rate
         if frame_rate == new_frame_rate:
@@ -266,7 +266,7 @@ class MimiModel(CompressionModel):
 
     def _to_encoder_framerate(self, x: jax.Array):
         # Convert from overall framerate to the encoder frame rate.
-        _, _, length = x.shape
+        _, length = x.shape
         frame_rate = self.encoder_frame_rate
         new_frame_rate = self.frame_rate
         if frame_rate == new_frame_rate:

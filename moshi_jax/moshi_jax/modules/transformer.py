@@ -1,4 +1,5 @@
 
+import math
 import equinox as eqx
 import equinox.nn as nn
 import jax
@@ -193,19 +194,19 @@ class StreamingMultiheadAttention(eqx.Module):
                 self.weights_per_step, self.in_proj, x
             )
         else:
-            print(x.shape)
-            print(self.in_proj.weight.shape)
             projected = jax.vmap(self.in_proj)(x)
         q, k, v = jnp.split(projected, 3, axis=-1) # type: ignore
 
         if self.rope:
             q, k = self.rope(q, k, 0) # type: ignore
 
-        kq = jnp.matmul(k, jnp.transpose(q))
+        kq = jnp.matmul(k, jnp.transpose(q)) / math.sqrt(jnp.shape(k)[-1])
         # Dim of (seq, seq), a matrix showing which tokens are interested in each other.
         # Mask to make causal
         # mask = jax.lax.stop_gradient(self.mask)
         mask = jnp.tril(jnp.ones((T, T)))
+        if self.context is not None:
+            mask = mask - jnp.tril(jnp.ones((T, T)), k= -self.context)
         kq = jnp.where(
             jnp.equal(jax.lax.stop_gradient(mask), 0), -jnp.inf, kq
         )  # Trick to lower compute
@@ -375,10 +376,8 @@ class StreamingTransformerLayer(eqx.Module):
 
     # @eqx.filter_jit
     def __call__(self, x: jax.Array):
-        print(f"Ours: {x[0, :3]}")
         x = self._sa_block(x)
-        print(f"Ours 2: {x[0, :3]}")
-
+        print(f"O State of attention : {x[:2, :5]}")
         x = self._ff_block(x)
         return x
 

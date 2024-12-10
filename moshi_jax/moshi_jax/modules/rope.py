@@ -42,7 +42,7 @@ class RotaryEmbedding(eqx.Module):
         assert D % 2 == 0
         assert max_period > 0
 
-        ds = jnp.arange(D // 2)
+        ds = jnp.arange(D // 2, dtype="float32")
         freqs = jnp.exp(ds * (-math.log(max_period) * 2 / D))
         # if time_before_heads:
         #     ts = jnp.expand_dims(jnp.arange(T), (1, 2))

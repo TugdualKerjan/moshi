@@ -226,7 +226,6 @@ class StreamingConv1d(eqx.Module):
         #         x = pad1d(x, (state.padding_to_add, 0), mode=self.pad_mode)
         #         state.padding_to_add = 0
         x= self.conv(x)
-        print(f"Ours 2: {x[0, :10]}")
         return x
 
 

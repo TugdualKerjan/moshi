@@ -209,13 +209,11 @@ class EuclideanCodebook(eqx.Module):
     # @eqx.filter_jit
     def __call__(self, x):
         shape = x.shape
-        print(f"O shape pre input: {x.shape}")
         x = self._reshape_input(x)
 
         codes = self._quantize(x)
         # print(f"O shape pre out: {flat_codes.shape}")
         # codes = self._reshape_codes(flat_codes, shape)
-        print(f"O shape after out: {codes.shape}")
         quantized = self.decode(codes)
         return (quantized, codes, {})
 
@@ -376,7 +374,7 @@ class ResidualVectorQuantization(eqx.Module):
         n_q = n_q or len(self.layers)
 
         for i, layer in enumerate(self.layers[:n_q]):  # type: ignore
-            jax.debug.print("O aaa {x}", x=residual[:3])
+            jax.debug.print("O aaa {x}", x=residual[0, :3])
 
             quantized, codes, metrics = layer(residual)
 
