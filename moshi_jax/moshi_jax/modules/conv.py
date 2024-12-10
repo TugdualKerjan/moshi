@@ -67,11 +67,11 @@ def pad1d(
         if length <= max_pad:
             extra_pad = max_pad - length + 1
             x = jnp.pad(x, ((0,0),(0, extra_pad)))
-        padded = jnp.pad(x, ( (0,0), paddings), mode, constant_values=value)
+        padded = jnp.pad(x, ( (0,0), paddings), mode)
         end = padded.shape[-1] - extra_pad
         return padded[..., :end]
     else:
-        return jnp.pad(x,( (0,0), paddings), mode, constant_values=value)
+        return jnp.pad(x,( (0,0), paddings), mode)
 
 
 def unpad1d(x: jax.Array, paddings: tp.Tuple[int, int]):
@@ -278,7 +278,6 @@ class StreamingConvTranspose1d(eqx.Module):
         padding_total = kernel_size - stride
 
         y = self.convtr(x)
-        print(f"Ours : {y[0, :10]}")
 
         # if not self.is_streaming:
             # We will only trim fixed padding. Extra padding from `pad_for_conv1d` would be

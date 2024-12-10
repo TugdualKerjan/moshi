@@ -260,7 +260,7 @@ class MimiModel(CompressionModel):
             return x
         if self.resample_method == "interpolate":
             target_length = int(length * new_frame_rate / frame_rate)
-            return jnp.expand_dims(jnp.interp(jnp.arange(target_length),jnp.arange(length), x[0, 0]), (0, 1))
+            return jax.image.resize(x, (x.shape[0], target_length), method="linear")
         else:
             return self.downsample(x)
 
@@ -273,7 +273,7 @@ class MimiModel(CompressionModel):
             return x
         if self.resample_method == "interpolate":
             target_length = int(length * new_frame_rate / frame_rate)
-            return jnp.expand_dims(jnp.interp(jnp.arange(target_length),jnp.arange(length), x[0, 0]), (0, 1))
+            return jax.image.resize(x, (x.shape[0], target_length), method="linear")
         else:
             return self.upsample(x)
 

@@ -54,7 +54,7 @@ class ConvDownsample1d(eqx.Module):
             causal=causal,
             groups=groups,
             bias=False,
-            pad_mode="constant",
+            pad_mode="edge",
             key=key
         )
         if not learnt:
@@ -120,7 +120,7 @@ class ConvTrUpsample1d(eqx.Module):
             convtr = eqx.tree_at(where, convtr, jnp.ones_like(convtr.convtr.convtr.weight))
         self.convtr = convtr
 
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def __call__(self, x: jax.Array):
         batch_size = len(x)
         if not self.learnt:
