@@ -78,6 +78,7 @@ class RawStreamingConvTranspose1d(
     # def _init_streaming_state(self, batch_size: int) -> _StreamingConvTrState:
     #     return _StreamingConvTrState()
 
+    @eqx.filter_jit
     def __call__(self, x: jax.Array) -> jax.Array:  # type: ignore
         # B, C, T = x.shape
         # stride = self.stride[0]

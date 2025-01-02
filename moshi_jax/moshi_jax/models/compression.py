@@ -193,8 +193,6 @@ class MimiModel(CompressionModel):
                 assert (
                     self.encoder_frame_rate > self._frame_rate
                 ), "Cannot upsample with conv."
-                print(self.encoder_frame_rate)
-                print(self._frame_rate)
                 downsample_stride = self.encoder_frame_rate / self._frame_rate
                 assert downsample_stride == int(
                     downsample_stride

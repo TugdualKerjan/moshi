@@ -113,7 +113,7 @@ class SEANetResnetBlock(eqx.Module):
                 key=key,
             )
 
-    # @eqx.filter_jit
+    @eqx.filter_jit
     def __call__(self, x):
         out = x
 
@@ -274,12 +274,11 @@ class SEANetEncoder(eqx.Module):
             key=key2
         )
 
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def __call__(self, x):
         y = self.first_layer(x)
 
         for resnetBlocks, down in self.blocks:
-            print(f"Ours : {y[0, :10]}")
 
             for block in resnetBlocks:
                 y = block(y)
@@ -288,7 +287,6 @@ class SEANetEncoder(eqx.Module):
             y = down(y)
 
         y = self.act(y)
-        print(f"Ours : {y[0, :10]}")
         return self.last_layer(y)
 
 

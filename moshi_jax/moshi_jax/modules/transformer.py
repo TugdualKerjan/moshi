@@ -377,7 +377,6 @@ class StreamingTransformerLayer(eqx.Module):
     # @eqx.filter_jit
     def __call__(self, x: jax.Array):
         x = self._sa_block(x)
-        print(f"O State of attention : {x[:2, :5]}")
         x = self._ff_block(x)
         return x
 
@@ -515,7 +514,6 @@ class ProjectedTransformer(eqx.Module):
     def __call__(self, x, *args, **kwargs):
         if self.conv_layout:
             x = jnp.transpose(x, (1, 0))
-        print(x.shape)
         x = jax.vmap(self.input_proj)(x) # type: ignore
         z = self.transformer(x, *args, **kwargs)
         ys = []

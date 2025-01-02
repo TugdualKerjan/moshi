@@ -137,10 +137,9 @@ class ResidualVectorQuantizer(BaseQuantizer):
             n_q = jax.random.randint(key, shape=(1,), minval=1, maxval=n_q)[0]
         quantized, codes, metrics = self.vq(x, n_q=n_q)
 
-        jax.debug.print("O after quant: {quantized}", quantized=quantized[10:])
         quantized = jnp.where(self.dropout(jnp.array(1), key=key), quantized, x)  # type: ignore
         quantized = self.output_proj(quantized)  # type: ignore
-        codes = codes.transpose(0, 1)
+        # codes = codes.transpose(0, 1)
         # codes is [B, K, T], with T frames, K nb of codebooks.
         bw = jnp.array(n_q * bw_per_q)
         return (quantized, codes, bw, metrics)
@@ -263,7 +262,6 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
         (sem_quantized, sem_codes, sem_bandwidth, sem_metrics) = self.rvq_first(
             x, frame_rate
         )
-        # print(self.n_q)
         if self.n_q == self.n_q_semantic:
             return (sem_quantized, sem_codes, sem_bandwidth, sem_metrics)
 
@@ -271,22 +269,22 @@ class SplitResidualVectorQuantizer(BaseQuantizer):
             x, frame_rate
         )
         # This is the actual number of quantizers used,  e.g. taking into account quantizer dropout.
-        n_q_semantic = sem_codes.shape[1]
-        n_q_acoustic = ac_codes.shape[1]
-        full_quantized_metrics = sem_metrics
-        for key, value in ac_metrics.items():
-            if key in full_quantized_metrics:
-                full_quantized_metrics[key] = self._renorm_and_add(
-                    full_quantized_metrics[key], value, n_q_semantic, n_q_acoustic
-                )
-            else:
-                full_quantized_metrics[key] = value
+        # n_q_semantic = len(sem_codes)
+        # n_q_acoustic = len(ac_codes)
+        # full_quantized_metrics = sem_metrics
+        # for key, value in ac_metrics.items():
+        #     if key in full_quantized_metrics:
+        #         full_quantized_metrics[key] = self._renorm_and_add(
+        #             full_quantized_metrics[key], value, n_q_semantic, n_q_acoustic
+        #         )
+        #     else:
+        #         full_quantized_metrics[key] = value
 
         return (
             sem_quantized + ac_quantized,
-            jnp.concat([sem_codes, ac_codes], axis=0),
+            [*sem_codes, *ac_codes],
             sem_bandwidth + ac_bandwidth,
-            full_quantized_metrics,
+            {},
         )
 
     def encode(self, x: jax.Array) -> jax.Array:

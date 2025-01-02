@@ -271,7 +271,7 @@ class StreamingConvTranspose1d(eqx.Module):
         ), "`trim_right_ratio` != 1.0 only makes sense for causal convolutions"
         assert self.trim_right_ratio >= 0.0 and self.trim_right_ratio <= 1.0
     
-    # @eqx.filter_jit
+    @eqx.filter_jit
     def __call__(self, x):
         kernel_size = self.convtr.convtr.kernel_size[0]
         stride = self.convtr.convtr.stride[0]
